@@ -171,6 +171,18 @@
 #  define RXBCTRL_BUKT	0x04
 #  define RXBCTRL_RXM0	0x20
 #  define RXBCTRL_RXM1	0x40
+
+#define RXBnCTRL_RXM_STD     0x20;
+#define RXBnCTRL_RXM_EXT     0x40;
+#define RXBnCTRL_RXM_STDEXT  0x00;
+#define RXBnCTRL_RXM_MASK    0x60;
+#define RXBnCTRL_RTR         0x08;
+// #define RXB0CTRL_BUKT        0x04;
+#define RXB0CTRL_FILHIT_MASK  0x03;
+#define RXB1CTRL_FILHIT_MASK  0x07;
+#define RXB0CTRL_FILHIT  0x00;
+#define RXB1CTRL_FILHIT  0x01;
+
 #define RXBSIDH(n)  (((n) * 0x10) + 0x60 + RXBSIDH_OFF)
 #  define RXBSIDH_SHIFT 3
 #define RXBSIDL(n)  (((n) * 0x10) + 0x60 + RXBSIDL_OFF)
@@ -668,6 +680,25 @@ static int mcp251x_do_set_bittiming(struct net_device *net)
 	return 0;
 }
 
+static void prepareId(uint8_t *buffer, int ext, const int id)
+{
+	uint16_t canid = (uint16_t)(id & 0x0FFFF);
+	if (ext == 1) {
+        buffer[3] = (uint8_t) (canid & 0xFF);
+        buffer[2] = (uint8_t) (canid >> 8);
+        canid = (uint16_t)(id >> 16);
+        buffer[1] = (uint8_t) (canid & 0x03);
+        buffer[1] += (uint8_t) ((canid & 0x1C) << 3);
+        buffer[1] |= 0x08;
+        buffer[0] = (uint8_t) (canid >> 5);
+    } else {
+        buffer[0] = (uint8_t) (canid >> 3);
+        buffer[1] = (uint8_t) ((canid & 0x07 ) << 5);
+        buffer[3] = 0;
+        buffer[2] = 0;
+    }
+}
+
 static int mcp251x_setup(struct net_device *net, struct spi_device *spi)
 {
 	int i = 0;
@@ -675,54 +706,87 @@ static int mcp251x_setup(struct net_device *net, struct spi_device *spi)
 
 	mcp251x_do_set_bittiming(net);
 
-	/* Setup recv buffer 0 control. default no hw filtering */
-	reg_val = RXBCTRL_BUKT | RXBCTRL_RXM1 | RXBCTRL_RXM0;
-	if (1 == rxbn_op_mode[0]) {
-		/* std ids only */
-		reg_val = RXBCTRL_BUKT | RXBCTRL_RXM0 ;
-	} else if (2 == rxbn_op_mode[0]) {
-		/* ext ids only */
-		reg_val = RXBCTRL_BUKT | RXBCTRL_RXM1;
-	} else if (3 == rxbn_op_mode[0]) {	
-		/* std or ext ids */
-		reg_val = RXBCTRL_BUKT;
-	}	
-	mcp251x_write_reg(spi, RXBCTRL(0), reg_val);
+	// /* Setup recv buffer 0 control. default no hw filtering */
+	// reg_val = RXBCTRL_BUKT | RXBCTRL_RXM1 | RXBCTRL_RXM0;
+	// if (1 == rxbn_op_mode[0]) {
+	// 	/* std ids only */
+	// 	reg_val = RXBCTRL_BUKT | RXBCTRL_RXM0 ;
+	// } else if (2 == rxbn_op_mode[0]) {
+	// 	/* ext ids only */
+	// 	reg_val = RXBCTRL_BUKT | RXBCTRL_RXM1;
+	// } else if (3 == rxbn_op_mode[0]) {	
+	// 	/* std or ext ids */
+	// 	reg_val = RXBCTRL_BUKT;
+	// }	
+	// mcp251x_write_reg(spi, RXBCTRL(0), reg_val);
 
-	/* Setup recv buffer 1 control. default no hw filtering */
-	reg_val = RXBCTRL_RXM1 | RXBCTRL_RXM0;
-	if (1 == rxbn_op_mode[1]) {
-		/* std ids only */
-		reg_val = RXBCTRL_RXM0 ;
-	} else if (2 == rxbn_op_mode[1]) {
-		/* ext ids only */
-		reg_val = RXBCTRL_RXM1;
-	} else if (3 == rxbn_op_mode[1]) {	
-		/* std or ext ids */
-		reg_val = 0;
-	}	
-	mcp251x_write_reg(spi, RXBCTRL(1), reg_val);
+	// /* Setup recv buffer 1 control. default no hw filtering */
+	// reg_val = RXBCTRL_RXM1 | RXBCTRL_RXM0;
+	// if (1 == rxbn_op_mode[1]) {
+	// 	/* std ids only */
+	// 	reg_val = RXBCTRL_RXM0 ;
+	// } else if (2 == rxbn_op_mode[1]) {
+	// 	/* ext ids only */
+	// 	reg_val = RXBCTRL_RXM1;
+	// } else if (3 == rxbn_op_mode[1]) {	
+	// 	/* std or ext ids */
+	// 	reg_val = 0;
+	// }	
+	// mcp251x_write_reg(spi, RXBCTRL(1), reg_val);
+
+	// receives all valid messages using either Standard or Extended Identifiers that
+    // meet filter criteria. RXF0 is applied for RXB0, RXF1 is applied for RXB1
+	mcp251x_write_reg(spi, RXBCTRL(0), uint8_t(0));
+	mcp251x_write_bits(spi, RXBCTRL(0), 
+							RXBnCTRL_RXM_MASK | RXBCTRL_BUKT | RXB0CTRL_FILHIT_MASK,
+							RXBnCTRL_RXM_STDEXT | RXBCTRL_BUKT | RXB0CTRL_FILHIT);
+
+	mcp251x_write_reg(spi, RXBCTRL(1), uint8_t(0));
+	mcp251x_write_bits(spi, RXBCTRL(1), 
+							RXBnCTRL_RXM_MASK | RXB1CTRL_FILHIT_MASK,
+							RXBnCTRL_RXM_STDEXT | RXB1CTRL_FILHIT);
+
+	
+	uint8_t tbufdata[4];
+	int ext = 0;
+	if((rxbn_op_mode[i] == 2) || (rxbn_op_mode[i] == 3)){
+		ext = 1;
+	}
 
 	/* Fill out mask registers */
 	for (i = 0; i < ARRAY_SIZE(rxbn_mask); i++) {
-		mcp251x_write_reg(spi, RXMSIDH(i), (uint8_t)(rxbn_mask[i]>>3));
-		mcp251x_write_reg(spi, RXMSIDL(i), (uint8_t)((rxbn_mask[i]<<5) | 
-			(0x3 & (rxbn_mask[i]>>27))));
-		mcp251x_write_reg(spi, RXMEID8(i), (uint8_t)(rxbn_mask[i]>>19));
-		mcp251x_write_reg(spi, RXMEID0(i), (uint8_t)(rxbn_mask[i]>>11));
+    	prepareId(tbufdata, ext, rxbn_mask[i]);
+
+		mcp251x_write_reg(spi, RXMSIDH(i), tbufdata[0]);
+		mcp251x_write_reg(spi, RXMSIDL(i), tbufdata[1]);
+		mcp251x_write_reg(spi, RXMEID8(i), tbufdata[2]);
+		mcp251x_write_reg(spi, RXMEID0(i), tbufdata[3]);
+
+		// mcp251x_write_reg(spi, RXMSIDH(i), (uint8_t)(rxbn_mask[i]>>3));
+		// mcp251x_write_reg(spi, RXMSIDL(i), (uint8_t)((rxbn_mask[i]<<5) | (0x3 & (rxbn_mask[i]>>27))));
+		// mcp251x_write_reg(spi, RXMEID8(i), (uint8_t)(rxbn_mask[i]>>19));
+		// mcp251x_write_reg(spi, RXMEID0(i), (uint8_t)(rxbn_mask[i]>>11));
 	}
 
+	memset(tbufdata, 0x00, sizeof(tbufdata));
 	/* Fill out filter registers */
 	for (i = 0; i < ARRAY_SIZE(rxbn_filters); i++) {
-		mcp251x_write_reg(spi, RXFSIDH[i], (uint8_t)(
-			rxbn_filters[i]>>3));
-		mcp251x_write_reg(spi, RXFSIDL[i], (uint8_t)(
-			(rxbn_filters[i]<<5) | (0x3 & (rxbn_filters[i]>>27)) | 
-			(0x8 & (rxbn_filters[i]>>29))));
-		mcp251x_write_reg(spi, RXFEID8[i], (uint8_t)(
-			rxbn_filters[i]>>19));
-		mcp251x_write_reg(spi, RXFEID0[i], (uint8_t)(
-			rxbn_filters[i]>>11));
+		prepareId(tbufdata, ext, rxbn_mask[i]);
+
+		mcp251x_write_reg(spi, RXFSIDH[i], tbufdata[0]);
+		mcp251x_write_reg(spi, RXFSIDL[i], tbufdata[1]);
+		mcp251x_write_reg(spi, RXFEID8[i], tbufdata[2]);
+		mcp251x_write_reg(spi, RXFEID0[i], tbufdata[3]);
+
+		// mcp251x_write_reg(spi, RXFSIDH[i], (uint8_t)(
+		// 	rxbn_filters[i]>>3));
+		// mcp251x_write_reg(spi, RXFSIDL[i], (uint8_t)(
+		// 	(rxbn_filters[i]<<5) | (0x3 & (rxbn_filters[i]>>27)) | 
+		// 	(0x8 & (rxbn_filters[i]>>29))));
+		// mcp251x_write_reg(spi, RXFEID8[i], (uint8_t)(
+		// 	rxbn_filters[i]>>19));
+		// mcp251x_write_reg(spi, RXFEID0[i], (uint8_t)(
+		// 	rxbn_filters[i]>>11));
 	}
 
 	return 0;
